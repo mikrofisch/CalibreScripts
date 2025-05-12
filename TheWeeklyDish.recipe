@@ -1,0 +1,303 @@
+##
+# Title:        Andrew Sullivan - The Weekly Dish
+# Contact:      Jens Rumberg - jens@rumbergdesign.de
+##
+# License:      GNU General Public License v3 - https://www.gnu.org/copyleft/gpl.html
+# Copyright:    Jens Rumberg - jens@rumbergdesign.de
+##
+# Written:      July 2020
+# Last Edited:  2022-02-02 
+##
+
+import os, string, re
+from contextlib import closing
+
+from calibre import (strftime, __appname__, force_unicode)
+from calibre.web.feeds.recipes import BasicNewsRecipe
+from calibre.ebooks.BeautifulSoup import BeautifulSoup
+from polyglot.builtins import unicode_type
+from calibre.gui2 import pixmap_to_data
+from calibre.constants import plugins_loc
+from math import sin, cos, radians
+from mechanize import Request
+
+from PyQt5.Qt import (
+    QApplication, QImage, Qt, QFont, QPainter, QPoint, QTextLayout, QTextOption,
+    QTextCharFormat, QColor, QRect, QPen, QBrush, QTransform, QPolygon
+)
+
+
+
+class TheWeeklyDish(BasicNewsRecipe):
+    title       = 'The Weekly Dish'
+    description = 'Andrew Sullvian\'s weekly blog.'
+    __license__ = 'GNU General Public License v3 - https://www.gnu.org/copyleft/gpl.html'
+    __copyright__ = 'Jens Rumberg - jens@rumbergdesign.de'
+    __version__   = '1.2'
+    __date__      = '2022-01-10'
+    __author__  = 'Jens Rumberg'
+
+    needs_subscription = 'optional'
+
+    timefmt = '  %a, %d %b, %Y'
+    
+    # remove_tags_before = dict(id='article')
+    remove_tags_after  = dict(attrs={'class':['markup']})
+    # keep_only_tags = [dict(attrs={'class':['main', 'post-title', 'subtitle', 'meta-with-photo', 'markup']})]
+    remove_tags = [dict(attrs={'class':['main-menu', 'user-head', 'audio-player-wrapper', 'post-meta-item', 'share-dialog', 'post-ufi-button', 'label', 'lucide', 'header-anchor-widget-icon']})]
+
+    no_stylesheets = True
+    masthead_url = 'https://bucketeer-e05bbc84-baa3-437e-9518-adb32be77984.s3.amazonaws.com/public/images/ff4350b5-0664-4110-8f7e-c8fd4a643189_1100x220.png'
+#    masthead_url = 'https://bucketeer-e05bbc84-baa3-437e-9518-adb32be77984.s3.amazonaws.com/public/images/dac4687e-5062-461a-bec6-064e39e879d8/apple-touch-icon-1024x1024.png'
+
+    extra_css = '''
+                .calibre_feed_list {font-family: miller-display, Georgia, serif;}
+                .calibre_feed_title {font-family: miller-display, Georgia, serif;}
+                .body {font-family: miller-text, Georgia, serif;font-size: 0.7em;}
+                .meta-with-photo {margin-bottom: 0.6em}
+                .meta-author {font-family: Roboto, sans-serif;margin-bottom: 0.5em}
+                .post-title {font-family: Roboto, sans-serif;font-size: 1.4em}
+                .subtitle {font-family: Roboto, sans-serif;font-weight: normal;font-size: 0.7em}
+                .image-caption {margin-top: 0.3em;font-size: 0.5em}
+                .sizing-default {width: 800px}
+                h6 {font-family: Roboto, sans-serif;font-weight: bold;margin-bottom: 0em;margin-top: 0.75em}
+                '''
+    max_articles_per_feed  = 5
+
+#    def get_browser(self):
+#        br = BasicNewsRecipe.get_browser(self)
+#        br.open('https://email.mg1.substack.com/c/eJxVUsGSojAQ_Rq5jZUEBDxwcB2txRp0Z0UdvVAhaZlACBQJOvD1G529TFWqq7pfp19Xv8eogaLphkg2hVBO22iTmaGFyOk1dJngEXb9ECM0d3iEAsKC3BE6u3YANRUycto-l4JRIxr16PaxG2DnMwo9D2EaIo790AvCAAGf0Rz7lBJgyJ19M9GeC1DMssno05hWT9zFhKzto4p3cNe9lOJG1VT3uTaUVVPW1A-0FTbesA3PNV6e29vMwq0EAxN3bZoK1MR9hWGDGTkOH0RWcdl8JePZS9LFfbe_C1sfGZG3vHpigh82s_MBn05H3h-RHt8rjZjb3g7lUb4f5-kWrzd05MvTKRFvy03LlrEflyt3t_SG7eB9JWnVJ2mCYnEX9LRGD75tufAsp7tLk5n9I-H3QuzKFUleC7RN38dkrHRcy5ENdpb6hc8CETvDTfaxjtXW5rZef90uRPaxQtONvN7mXcbu8ellvbssdP3nbTjuvfqiV-zjnP69j26KZ8lSeRPid8BFB8zYQzgiIoggTPAchTNC0BRPJSGhhKG8jnriobrAPy7tdFEJ6oF0fZ1DV3DQolBTDg_ZM9tR90qYIQNFcwk8Ml0PjvnvpacyWQEKOmsynlETYR-Frh_MrTeC4NsC1jOO5eSN7VbRT9n_AVOl4jE')
+#        return br
+
+    def get_browser(self):
+        br = BasicNewsRecipe.get_browser(self)
+        br.open('https://andrewsullivan.substack.com/')
+        if self.username is not None and self.password is not None:
+            try:
+                br.open('https://andrewsullivan.substack.com/account/login')
+
+                request_query = {
+                    'email': self.username,
+                    'password': self.password,
+                    'captcha_response': 'null'
+                }
+
+                login_url='https://andrewsullivan.substack.com/api/v1/login'
+                rq = Request(login_url, headers={
+                    'Accept': 'text/html',
+                    'Accept-Language': 'en-US,en;q=0.8',
+                    'X-HTTP-Method-Override': 'POST',
+                    'X-Requested-With': 'XMLHttpRequest'
+                }, data=request_query)
+                self.log('Sending login request...')
+
+                br.open(rq)
+
+            except:
+                self.log.exception(
+                    'Unable to locate login form! Switching to free mode.')
+        return br
+
+    def parse_index(self):
+        soup = self.index_to_soup('https://andrewsullivan.substack.com/archive')
+
+        def feed_title(div):
+            return ''.join(div.findAll(text=True, recursive=False)).strip()
+
+        def add_key(feed_name):
+            key = feed_name
+            articles[key] = []
+            ans.append(key)
+            return 1
+
+        feed_main = 'The Weekly Dish'
+        feed_vfyw = 'The View From Your Window'
+        articles = {}
+        key = None
+        ans = []
+        
+        add_key(feed_main)
+        add_key(feed_vfyw)
+
+        script_txt = soup.find("script", string=re.compile("title")).string
+
+        count_vfyw = 0
+        p = 0
+        while True:
+            p = script_txt.find("\"title\"", p)
+            if (p == -1):
+                break
+            p += 9
+            title = script_txt[p:script_txt.find("\"", p)]
+            if ("VFYW" in title or "View From Your Window" in title):
+                key = feed_vfyw
+                count_vfyw += 1
+                if (count_vfyw > 2):
+                    continue
+            else:
+                key = feed_main
+
+            p = script_txt.find("\"post_date\"", p)
+            p += 13
+            pubdate = " "+script_txt[p:p+10]
+
+            p = script_txt.find("\"canonical_url\"", p)
+            p += 17
+            url = script_txt[p:script_txt.find("\"", p)]
+
+            p = script_txt.find("\"description\"", p)
+            p += 15
+            description = script_txt[p:script_txt.find("\"", p)]
+
+            # print(title, pubdate, description, url)
+
+            feed = key if key is not None else feed_name
+
+            if feed not in articles:
+                articles[feed] = []
+
+            articles[feed].append(
+                    dict(title=title, url=url, date=pubdate,
+                            description=description,
+                            content=''))
+        ans = [(key, articles[key]) for key in ans if key in articles]
+        return ans
+
+    def preprocess_html(self, soup):
+#        headsec = soup.find('div', attrs={'class':['article-header-section']})
+#        headsec.a.string = headsec.a.string.upper()
+
+        script_txt = soup.find("script", string=re.compile("datePublished")).string
+        
+        p = script_txt.find("\"datePublished\"")
+        p += 17
+        date_pub = script_txt[p:p+10]
+
+        user_name = soup.find("a", attrs={'class':['user-name']})
+        if user_name:
+            user_name.append(" | "+date_pub)
+
+#        # Delete first image (Dish logo)
+#        dish_head = soup.find("a", attrs={'class':['image-link']})
+#        if dish_head:
+#            dish_head.decompose()
+
+        return soup
+
+    def default_cover(self, cover_file):
+    
+        # Create a generic cover for recipes that don't have a cover
+
+        try:
+            title = self.title if isinstance(self.title, unicode_type) else \
+                    self.title.decode(preferred_encoding, 'replace')
+            date = strftime(self.timefmt).replace('[', '').replace(']', '')
+
+            # app = QApplication.instance()
+            app = QApplication(['-platformpluginpath', plugins_loc, '-platform', 'offscreen'])
+            # app = QGuiApplication(["-platform", "offscreen"])
+
+            covw = 1264
+            covh = 1680
+            img = QImage(covw, covh, QImage.Format_ARGB32)
+
+            p = QPainter(img)
+            rect = QRect(0, 0, img.width(), img.height())
+
+            p.fillRect(rect, QColor(255, 255, 255))
+
+            p.setPen(QColor(0, 0, 0));
+
+            # Get logo image & convert to QPixmap in correct size
+            #
+            logu = "https://bucketeer-e05bbc84-baa3-437e-9518-adb32be77984.s3.amazonaws.com/public/images/ff4350b5-0664-4110-8f7e-c8fd4a643189_1100x220.png"
+            cdata = None
+            with closing(self.browser.open(logu)) as r:
+                cdata = r.read()
+            if not cdata:
+                return
+
+            logoImg = QImage()
+            logoImg.loadFromData(cdata)
+            logoScaled = logoImg.scaledToWidth(int(covw*0.8))
+
+            p.drawImage(int(covw/2 - logoScaled.width()/2), int(covh*0.2), logoScaled)
+
+            # Date
+            font = QFont()
+            font.setFamily('Miller Text')
+            font.setStyleStrategy(QFont.StyleStrategy.PreferAntialias)
+
+            dia = int(covw/4)
+            hpos = int(covw*0.5)
+            vpos = int(covh*0.6)
+            # hpos = covw*0.75
+            # vpos = covh*0.78
+
+            def draw_triangle(ptr, cx, cy, rad, size, angle) :
+
+                rad -= 1
+                angle = radians(angle)
+                bx = int(cx+rad*sin(angle))
+                by = int(cy-rad*cos(angle))
+                ox = int((size/2)*cos(angle))
+                oy = int((size/2)*sin(angle))
+
+                tri = QPolygon([QPoint(bx-ox,by-oy),
+                                QPoint(bx+ox,by+oy),
+                                QPoint(cx+int((rad+size)*sin(angle)),cy-int((rad+size)*cos(angle)))])
+                ptr.drawPolygon(tri)
+
+            pen = QPen(QColor(0, 0, 0))
+            pen.setWidth(1)
+            p.setPen(pen)
+            p.setBrush(QBrush(QColor(0, 0, 0)))
+            y = int(hpos - dia/2)
+            p.drawEllipse(y, int(vpos-dia/2), dia, dia)
+#            for i in range(0, 72) :
+#                draw_triangle(p, hpos, vpos, int(dia/2), int(dia/20), i*5)
+            for i in range(0, 45) :
+                draw_triangle(p, hpos, vpos, int(dia/2), int(dia/15), i*8)
+
+            fsize = int(dia / 10 * 1.8)
+            font.setPixelSize(fsize)
+            font.setBold(True       )
+            p.setFont(font)
+            p.setPen(QPen(QColor(255, 255, 255)))
+            gap = int(fsize*0.3)
+
+            p.drawText(QRect(y, vpos-int(fsize*1.5)-gap, dia, int(fsize*1.2)), Qt.AlignHCenter, strftime('%a'))
+            p.drawText(QRect(y, vpos-int(fsize/2), dia, int(fsize*1.2)), Qt.AlignHCenter, strftime('%d')+' '+strftime('%b'))
+            p.drawText(QRect(y, vpos+int(fsize*0.4)+gap, dia, int(fsize*1.2)), Qt.AlignHCenter, strftime('%Y'))
+
+            # Border rectangle
+            borderOff = 40
+            pen.setWidth(2)
+            p.setPen(pen)
+            p.setBrush(QColor(255,255,255,0))
+            p.drawRoundedRect(QRect(borderOff, borderOff, covw-2*borderOff, covh-2*borderOff), 40, 40)
+
+            # Calibre logo at bottom of page
+            logu = "https://github.com/kovidgoyal/calibre/blob/master/icons/calibre.png?raw=true"
+            cdata = None
+            with closing(self.browser.open(logu)) as r:
+                cdata = r.read()
+            if not cdata:
+                return
+
+            logoh = 160
+            logoImg = QImage()
+            logoImg.loadFromData(cdata)
+            logoScaled = logoImg.scaledToHeight(logoh)
+
+            p.drawImage(int(covw/2-logoScaled.width()/2), int(covh-logoh-borderOff-4), logoScaled)
+
+            p.end()
+
+            cover_file.write(pixmap_to_data(img))
+            cover_file.flush()
+        except:
+            self.log.exception('Failed to generate default cover')
+            return False
+        return True
+

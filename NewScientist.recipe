@@ -1,0 +1,368 @@
+##
+# Title:        New Scientist - Print Edition
+# Contact:      Jens Rumberg - jens@rumbergdesign.de
+##
+# License:      GNU General Public License v3 - https://www.gnu.org/copyleft/gpl.html
+# Copyright:    Jens Rumberg - jens@rumbergdesign.de
+##
+# Written:      Apr 2020
+# Last Edited:  2020-09-10
+##
+
+import os, string, re
+from datetime import datetime
+
+from calibre import (strftime, __appname__, force_unicode)
+from calibre.web.feeds.recipes import BasicNewsRecipe
+from calibre.ebooks.BeautifulSoup import BeautifulSoup
+
+class NewScientist(BasicNewsRecipe):
+    title       = 'New Scientist'
+    description = 'New Scientist Weekly Print Edition. Install the Google fonts \'PT Serif\' and \'Titillium Web\' on your reading device for best results.'
+    __license__   = 'GNU General Public License v3 - https://www.gnu.org/copyleft/gpl.html'
+    __copyright__ = 'Jens Rumberg - jens@rumbergdesign.de'
+    __version__   = '1.1'
+    __date__      = '2020-09-10'
+    __author__    = 'Jens Rumberg'
+
+    needs_subscription = 'optional'
+
+    # Set this to the issue number for downloading a specific issue.
+    # If empty the latest issue will be downloaded.
+    issue_nr = ''
+
+    remove_empty_feeds = True
+    timefmt = ' %a, %d %b, %Y'
+    remove_tags_before  = dict(id='main-container')
+    remove_tags_after  = dict(attrs={'class':['article-content']})
+    remove_tags = [dict(attrs={'class':['social__button-container', 'mpu', 'eyebrow--article', 'article-topics']}),
+                   dict(id='breadcrumbs'), dict(rel='apple-touch-icon'), dict(rel='shortcut icon'), dict(rel='wlwmanifest')]
+
+    no_stylesheets = True
+    masthead_url = 'https://www.newscientist.com/build/images/assets/img/logo.svg'
+
+    resolve_internal_links = True
+
+    extra_css = '''
+                body {font-family: "PT Serif", Georgia, serif;}
+                p {line-height: 1.3;margin-top: 0.4em; margin-bottom: 0.4em;}
+                h1 {font-family: "Titillium Web", Helvetica, Arial, sans-serif;font-weight: 700;}
+                h2 {font-family: "Titillium Web", Helvetica, Arial, sans-serif;font-weight: 700;margin-bottom: 0.5em;}
+                h3 {font-family: "Titillium Web", Helvetica, Arial, sans-serif;font-weight: 700;font-size: 1.2em; margin-top: 0.3em;margin-bottom: 0.3em}
+                blockquote {font-family: "Titillium Web", Helvetica, Arial, sans-serif;font-size: 0.9em; line-height: 1.3;margin: 0em 1em}
+                img {margin-top: 0.5em;margin-bottom: 0.3em;}
+                .credit {margin-top: 0;marging-bottom: 0.6em;}
+                .quote-par {line-height: 1.3;margin-top: 0;margin-bottom:0.7em;}
+                .article-title {line-height: 1em;margin-top: 0.3em;margin-bottom: 0.3em}
+                .article {font-family: "Titillium Web", Helvetica, Arial, sans-serif;}
+                .title-read-more {margin-bottom: 0.5em}
+                .list-read-more {margin-top: 0.5em}
+                .calibre_feed_list {font-family: "Titillium Web", Helvetica, Arial, sans-serif;}
+                .content__strap {font-family: "Titillium Web", Helvetica, Arial, sans-serif;line-height: 1.1em;}
+                .article__eyebrow {text-transform: uppercase;}
+                .author-byline {font-family: "Titillium Web", Helvetica, Arial, sans-serif;margin-top: 0.3em;margin-bottom: 0.3em;}
+                .bold-text {font-family: "Titillium Web", Helvetica, Arial, sans-serif;}
+                .article-body {font-family: "PT Serif", Georgia, serif;font-size: 0.8em;}
+                .font-sans-serif-xxs--regular {font-family: "Titillium Web", Helvetica, Arial, sans-serif;font-weight: 400;}
+                .font-sans-serif-xxs--bold {font-family: "Titillium Web", Helvetica, Arial, sans-serif;font-weight: 700;}
+                .font-sans-serif-xxxs--regular {font-family: "Titillium Web", Helvetica, Arial, sans-serif;font-weight: 400;font-size: x-small;}
+                .font-sans-serif-xxxs--bold {font-family: "Titillium Web", Helvetica, Arial, sans-serif;font-weight: 700;font-size: x-small;}
+                '''
+    # max_articles_per_feed  = 3
+
+    def get_browser(self):
+        br = BasicNewsRecipe.get_browser(self)
+        br.open('http://www.newscientist.com/')
+        if self.username is not None and self.password is not None:
+            try:
+                br.open('https://www.newscientist.com/login/')
+                br.select_form(action='/login/')
+                br['email']    = self.username
+                br['password'] = self.password
+                br.submit()
+            except:
+                self.log.exception(
+                    'Unable to locate login form! Switching to free mode.')
+        return br
+
+    def get_article_type(self, soup):
+        type = ""
+        md = soup.find(id='permutive-1')
+        if md :
+            loc = md.string.find("\"type\"")
+            if loc < 0 :
+                url = soup.find('link', rel='canonical')
+                if url['href'].find("https://www.newscientist.com/letter/") == 0 :
+                    return "Letters"
+                return ""
+            loc = md.string.find("\"type\"", loc+5)
+            loc += 8
+            type = md.string[loc:md.string.find("\"", loc+1)]
+        return type
+
+    def parse_index(self):
+        # Find latest print issue
+        soup = self.index_to_soup('https://www.newscientist.com')
+
+        div = soup.find(True, attrs={'class':['section-thisweek']})
+        a = div.find('a', href=True)
+
+        issue_nr = self.issue_nr
+        if not issue_nr:
+            issue_nr = re.sub('/issue/', '', a['href'])
+            issue_nr = issue_nr.strip('/')
+
+        issue_url = "https://www.newscientist.com/issue/"+issue_nr+"/"
+
+        if issue_nr:
+            non_decimal = re.compile(r'[^\d.]+')
+            issue_nr = non_decimal.sub('', issue_nr)
+            self.conversion_options.update({'series': 'New Scientist'})
+            self.conversion_options.update({'series_index': issue_nr})
+
+        # Now parse the issue's page
+        def feed_title(div):
+            return ''.join(div.findAll(text=True, recursive=False)).strip()
+
+        soup = self.index_to_soup(issue_url)
+
+        # Find date
+        title =  soup.find('title').string
+        date_start = title.find(":")+1
+        date_end = title.find("|", date_start)
+        issue_date = datetime.strptime(title[date_start:date_end].strip(), '%d %B %Y')
+        self.conversion_options.update({ 'pubdate': issue_date.strftime('%d/%m/%Y') })
+
+        self.title = self.title + " " + issue_date.strftime('%Y-%m-%d')
+
+        # Find cover
+        div = soup.find(True, attrs={'class':['issue-new-cover-details']})
+        a = div.find('a', href=True)
+
+        self.cover_url = re.sub(r'\?.*', '', a['href'])
+
+        # Find TOC
+        toc = soup.find('section', attrs={'class':['magazine-article-index']})
+
+        articles = {}
+        key = None
+        ans = []
+        for div in toc.findAll(True,
+            attrs={'class':['leaders', 'news', 'analysis', 'aperture', 'features', 'culture', 'issue-new-more', 'regulars', 'index-entry']}):
+#            attrs={'class':['issue-new-more', 'regulars', 'index-entry']}):
+#            attrs={'class':['issue-new-more', 'index-entry']}):
+
+            if ''.join(div['class']) in ['index-entry']:
+                a = div.find('a', href=True)
+                if not a:
+                    continue
+
+                url = re.sub(r'\?.*', '', a['href'])
+
+                title = a.string
+                description = ''
+                # pubdate = strftime('%a, %d %b')
+                feed = key if key is not None else 'Uncategorized'
+
+                if feed not in articles:
+                    articles[feed] = []
+                url='https://www.newscientist.com'+url
+                articles[feed].append(
+                        dict(title=title, url=url, date='',
+                                description=description,
+                                content=''))
+            elif ''.join(div['class']) in ['regulars']:
+
+                # Parse LETTERS, FEEDBACK, THE LAST WORD
+
+                def add_next_key(a):
+                    a = a.find_next('a', href=True)
+                    key = a.string
+                    articles[key] = []
+                    ans.append(key)
+                    return a
+
+                def add_entries(a):
+                    try:
+                        url = 'https://www.newscientist.com'+a['href']
+                        entries = self.index_to_soup(url)
+                    except:
+                        return
+
+                    for entry in entries.findAll(True, attrs={'class':['entry-title']}):
+                        ent_a = entry.find('a', href=True)
+                        if not ent_a:
+                            continue
+                        ent_url = 'https://www.newscientist.com'+re.sub(' ', '', ent_a['href'])
+                        ent_title = ent_a.string.strip()
+                        ent_a = ent_a.find_next('p')
+                        ent_desc = ent_a.encode_contents()
+                        if not ent_desc.strip():
+                            # In the LETTERS page the letter author is nested further
+                            ent_a = ent_a.find_next('p')
+                            if ent_a.i:
+                                ent_desc = ent_a.i.string
+                            else:
+                                ent_desc = ent_a.string
+                        articles[a.string].append(dict(title=ent_title, url=ent_url, date='',
+                                    description=ent_desc.strip(),
+                                    content=''))
+
+                a = toc.find('a', attrs={'class':['regulars']})
+
+                # LETTERS
+                a = add_next_key(a)
+                add_entries(a)
+
+                # FEEDBACK
+                a = add_next_key(a)
+                url = 'https://www.newscientist.com'+a['href']
+
+                feedback = self.index_to_soup(url)
+                fb_title = feedback.find(attrs={'class':['article-title']})
+                articles[a.string].append(dict(title=fb_title.string, url=url, date='',
+                                    description='', content=''))
+
+                # THE LAST WORD
+                a = add_next_key(a)
+                add_entries(a)
+ 
+            else:
+                key = feed_title(div)
+                if key and key not in articles:
+                    if key == 'More' :
+                        key = 'The Back Pages'
+                    articles[key] = []
+                    ans.append(key)
+        
+        # Polish Back Pages index
+        back_pages = articles['The Back Pages']
+        for art in back_pages :
+            art_soup = self.index_to_soup(art['url'])
+            type = self.get_article_type(art_soup)
+            if type == "Two-minute interview" :
+                content_desc = art_soup.find(attrs={'class':['content__strap']})
+                if content_desc :
+                    qa_name = art['title']
+                    qa_name_tag = content_desc.find(['b', 'strong'])
+                    if qa_name_tag :
+                        qa_name = qa_name_tag.string
+                art['title'] = type + ": " + qa_name
+            elif type not in ["Science of cooking", "Puzzles"]:
+                art['title'] = type + ": " + art['title']
+ 
+        ans = [(key, articles[key]) for key in ans if key in articles]
+
+        return ans
+
+    def preprocess_html(self, soup):
+
+        img_width = "?width=800"
+
+        # Additional formatting for selected pages
+        cat_title = soup.new_tag("h3")
+        title = soup.find(attrs={'class':['article-title']})
+
+        type = self.get_article_type(soup)
+        if type == "Cartoon" :
+            img_width = ""
+        elif type == "Aperture" :
+            img_width = ""
+        elif type == "Two-minute interview" :
+            # Delete first image
+            fig = soup.find('figure')
+            if fig and fig.find_next('figure') :
+                fig.decompose()
+            img_width = "?width=400"
+
+        if type in ["Cartoon", "Old Scientist", "Science of cooking", "Puzzles", "Two-minute interview"] :
+            type = "The back pages | " + type
+        cat_title.string = type
+
+        if cat_title.string :
+            title.insert_before(cat_title)
+
+        # Add style for bold text
+        content = soup.find(True, attrs={'class':['article-content']})
+        for pqb in content.findAll(name='b') :
+            pqb['class'] = 'bold-text'
+
+        # Fix image links
+        for img in soup.findAll('img'):
+            if img.has_attr('data-src'):
+                img['src'] = img['data-src'].replace("?width=300", img_width)
+
+        # Find date
+        date = ""
+        tag = soup.find('span', attrs={'class':['published-date']})
+        if tag :
+            date = tag.string.strip()
+
+        tag = soup.find('section', attrs={'class':['article__eyebrow-container']})
+        if tag :
+            tag.decompose()
+
+        # Find author
+        author = ""
+        tag = soup.find('a', attrs={'class':['author']})
+        if tag :
+            author = tag.string.strip()
+            tag.decompose()
+
+        # Remove existing author-byline
+        tag = soup.find('p', attrs={'class':['author-byline']})
+        if tag :
+            tag.decompose()
+
+        # Create new author-byline
+        header = soup.find('header')
+        author_byline = soup.new_tag("p", attrs={'class':['author-byline']})
+        if author :
+            author_byline.append("By "+author+" | ")
+        author_byline.append(date)
+        header.insert_after(author_byline)
+
+        # Clean up box-outs
+        read_more = []
+        for tag in soup.findAll('div', attrs={'class':['box-out']}):
+            txt = tag.find('h4')
+            if txt and txt.contents[0] == u'Read more: ' :
+                # Collate 'Read more' references into a list at the bottom of the article
+                a = txt.contents[1]
+                read_more.append(dict(url='https://www.newscientist.com'+a['href'], text=a.string))
+                tag.decompose()
+            elif txt and txt.contents[0][0:8] == u'Register' :
+                # We don't care about these
+                tag.decompose()
+            else:
+                # Convert everything else into blockquotes
+                tag.name = "blockquote"
+                for p in tag.findAll('p') :
+                    p['class'] = 'quote-par'
+
+        # Add the 'READ MORE' section
+        if read_more :
+            at = soup.find('div', attrs={'class':['main-content']})
+            bq = soup.new_tag("blockquote")
+            at.insert_after(bq)
+            nt = soup.new_tag("h4", attrs={"class": "title-read-more"})
+            nt.string="READ MORE"
+            bq.append(nt)
+            ul = soup.new_tag("ul", attrs={"class": "list-read-more"})
+            bq.append(ul)
+            for lnk in read_more :
+                li = soup.new_tag("li")
+                a = soup.new_tag("a")
+                a.string = lnk['text']
+                a['href'] = lnk['url']
+                li.append(a)
+                ul.append(li)
+
+        # Fix inline quotes
+        for tag in soup.findAll('p', attrs={'class':['quote']}):
+            tag.name = "blockquote"
+            if tag.string :
+                tag_title = soup.new_tag("h3") 
+                tag.string.wrap(tag_title)
+
+        return soup
